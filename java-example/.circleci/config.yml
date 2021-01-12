@@ -1,0 +1,43 @@
+version: 2
+jobs:
+  build:
+    machine:
+      image: ubuntu-2004:202010-01
+    steps:
+      - checkout
+      - run:
+          name: Update Dependencies And Install Java 11
+          command:  |
+              sudo apt-get -y update
+              sudo apt install -y openjdk-11-jdk
+              java -version
+
+      - run:
+          name: Build the code
+          command:  |
+              chmod +x gradlew
+              ./gradlew build -x test
+            
+      - run:
+          name: Start Agent and Wait for agent to register
+          command: |
+              set -x
+              docker-compose up -d
+              trap 'kill $(jobs -p)' EXIT
+              attempt_counter=0
+              max_attempts=45
+              mkdir -p build/reports/agent
+              docker-compose -f docker-compose.yml logs -f | tee build/reports/agent/log.txt&
+              until curl -s http://localhost:8585/api/status | jq '.registered' | grep true; do
+                if [ ${attempt_counter} -eq ${max_attempts} ]; then
+                  echo "Agent failed to register. Terminating..."
+                  exit 1
+                fi
+                attempt_counter=$(($attempt_counter+1))
+                sleep 1
+              done
+
+      # run tests
+      - run:
+          name: Run Test
+          command: ./gradlew test
